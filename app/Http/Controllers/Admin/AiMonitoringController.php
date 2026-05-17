@@ -57,6 +57,7 @@ class AiMonitoringController extends Controller
             'successCount' => AIUsageLog::where('success', true)->count(),
             'failedCount' => AIUsageLog::where('success', false)->count(),
             'fallbackCount' => AIUsageLog::where('fallback_used', true)->count(),
+            'openaiCalls' => AIUsageLog::where('provider', 'openai')->count(),
             'ollamaCalls' => AIUsageLog::where('provider', 'ollama')->count(),
             'fakeFallbackCalls' => AIUsageLog::where('provider', 'fake')->where('fallback_used', true)->count(),
             'averageLatencyMs' => (int) round((float) AIUsageLog::whereNotNull('latency_ms')->avg('latency_ms')),

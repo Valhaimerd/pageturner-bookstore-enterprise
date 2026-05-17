@@ -75,7 +75,7 @@ class BookAssistantController extends Controller
                 'fallback_used' => (bool) ($result['fallback_used'] ?? false),
                 'confidence' => (float) ($result['confidence'] ?? 0.0),
                 'needs_human_help' => (bool) ($result['needs_human_help'] ?? true),
-                'error_message' => $this->safeError($result['error_message'] ?? null),
+                'error_message' => $this->safeError($result),
                 'session_id' => $sessionId,
             ])
             ->header('X-AI-Session-ID', $sessionId);
@@ -251,7 +251,7 @@ class BookAssistantController extends Controller
             'provider_used' => $result['provider_used'] ?? 'none',
             'confidence' => (float) ($result['confidence'] ?? 0.0),
             'needs_human_help' => (bool) ($result['needs_human_help'] ?? true),
-            'error_message' => $this->safeError($result['error_message'] ?? null),
+            'error_message' => $this->safeError($result),
             'recommendations' => $this->viewRecommendations($result),
         ];
     }
@@ -294,8 +294,18 @@ class BookAssistantController extends Controller
         })->values()->all();
     }
 
-    protected function safeError(?string $error): ?string
+    protected function safeError(array $result): ?string
     {
-        return $error ? 'AI assistant could not complete the request safely.' : null;
+        if (empty($result['error_message'])) {
+            return null;
+        }
+
+        $provider = (string) ($result['provider_used'] ?? 'none');
+        $recommendations = collect($result['recommendations'] ?? []);
+        $hasUsableAnswer = trim((string) ($result['answer'] ?? '')) !== ''
+            && $provider !== 'none'
+            && $recommendations->isNotEmpty();
+
+        return $hasUsableAnswer ? null : 'AI assistant could not complete the request safely.';
     }
 }

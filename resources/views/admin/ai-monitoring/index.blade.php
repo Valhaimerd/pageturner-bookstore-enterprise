@@ -5,7 +5,7 @@
                 Lab 8 AI Monitoring
             </h2>
             <p class="mt-1 text-sm text-ink-500">
-                Evidence dashboard for AI usage logs, audit events, fallback activity, and zero-cost local providers.
+                Evidence dashboard for AI usage logs, audit events, fallback activity, and provider cost tracking.
             </p>
         </div>
     </x-slot>
@@ -30,12 +30,17 @@
             <div class="metric-card">
                 <p class="metric-label">Fallback Used</p>
                 <p class="metric-value">{{ $fallbackCount }}</p>
-                <p class="metric-note">Recovered with fake provider</p>
+                <p class="metric-note">Recovered through fallback chain</p>
+            </div>
+            <div class="metric-card">
+                <p class="metric-label">OpenAI Calls</p>
+                <p class="metric-value">{{ $openaiCalls }}</p>
+                <p class="metric-note">Primary cloud provider</p>
             </div>
             <div class="metric-card">
                 <p class="metric-label">Ollama Calls</p>
                 <p class="metric-value">{{ $ollamaCalls }}</p>
-                <p class="metric-note">Local real provider</p>
+                <p class="metric-note">Local fallback provider</p>
             </div>
             <div class="metric-card">
                 <p class="metric-label">Fake Fallback Calls</p>
@@ -50,7 +55,7 @@
             <div class="metric-card">
                 <p class="metric-label">Estimated Cost Total</p>
                 <p class="metric-value">&#8369;0.00</p>
-                <p class="metric-note">{{ number_format($estimatedCostTotal, 6) }} tracked cost, local/free providers</p>
+                <p class="metric-note">{{ number_format($estimatedCostTotal, 6) }} tracked provider cost</p>
             </div>
         </section>
 
@@ -62,7 +67,11 @@
                 <div class="mt-5 space-y-3">
                     @forelse($providerBreakdown as $provider)
                         <div class="flex items-center justify-between rounded-2xl bg-sage-50 px-4 py-3">
-                            <span class="font-semibold text-ink-800">{{ ucfirst($provider->provider) }}</span>
+                            <span class="font-semibold text-ink-800">{{ match ($provider->provider) {
+                                'openai' => 'OpenAI',
+                                'gemini' => 'Gemini',
+                                default => ucfirst($provider->provider),
+                            } }}</span>
                             <span class="status-pill status-pill-default">{{ $provider->total }} calls</span>
                         </div>
                     @empty
@@ -119,7 +128,11 @@
                             <tr>
                                 <td>#{{ $log->id }}</td>
                                 <td>{{ $log->user?->email ?: 'Guest' }}</td>
-                                <td>{{ ucfirst($log->provider) }}</td>
+                                <td>{{ match ($log->provider) {
+                                    'openai' => 'OpenAI',
+                                    'gemini' => 'Gemini',
+                                    default => ucfirst($log->provider),
+                                } }}</td>
                                 <td>{{ str_replace('_', ' ', $log->feature) }}</td>
                                 <td>
                                     <span class="status-pill {{ $log->success ? 'status-pill-completed' : 'status-pill-pending' }}">
@@ -169,7 +182,11 @@
                                 <td>{{ $event->user?->email ?: 'Guest' }}</td>
                                 <td>{{ str_replace('_', ' ', $event->feature) }}</td>
                                 <td>{{ str_replace('_', ' ', $event->action) }}</td>
-                                <td>{{ $event->provider ? ucfirst($event->provider) : 'None' }}</td>
+                                <td>{{ $event->provider ? match ($event->provider) {
+                                    'openai' => 'OpenAI',
+                                    'gemini' => 'Gemini',
+                                    default => ucfirst($event->provider),
+                                } : 'None' }}</td>
                                 <td>
                                     <span class="status-pill {{ $event->risk_level === 'high' ? 'status-pill-pending' : 'status-pill-default' }}">
                                         {{ ucfirst($event->risk_level) }}

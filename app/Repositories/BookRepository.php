@@ -23,6 +23,7 @@ class BookRepository
         return $this->rememberCatalogResult('web', $filters, $perPage, function () use ($filters, $perPage) {
             return $this->catalogCardQuery()
                 ->with('category:id,name,slug')
+                ->when($filters['search'] ?? null, fn (Builder $query, string $search) => $this->applySearch($query, $search))
                 ->when($filters['category'] ?? null, fn (Builder $query, string $category) => $this->applyCategorySlugFilter($query, $category))
                 ->orderBy('published_at', 'desc')
                 ->orderBy('id', 'desc')

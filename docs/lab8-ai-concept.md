@@ -1,4 +1,4 @@
-# PageTurner AI Book Discovery and Customer Support Assistant Using Ollama
+# PageTurner AI Book Discovery and Customer Support Assistant Using OpenAI With Ollama Fallback
 
 ## 1. Problem Statement
 
@@ -6,7 +6,7 @@ PageTurner customers can browse categories and search by keywords, but many user
 
 This problem affects visitors who are still exploring, customers who want a faster way to choose books, and admins who need to understand how users search for products. Keyword search is not enough because it cannot reliably understand intent, context, reading level, or follow-up needs. For example, a customer may ask for "something inspiring about friendship" even if no book title contains those exact words.
 
-An AI assistant solves this better by interpreting the request, mapping it to catalog topics, retrieving real PageTurner books, and explaining why each recommendation fits. Ollama is selected because it runs locally, requires no paid cloud API, avoids external API keys, supports offline development, and fits the laboratory requirement for real AI integration without depending on OpenAI, Gemini, Hugging Face, or Google APIs.
+An AI assistant solves this better by interpreting the request, mapping it to catalog topics, retrieving real PageTurner books, and explaining why each recommendation fits. OpenAI is selected as the primary free-tier cloud AI provider because it gives strong conversational reasoning and structured output support for book discovery. Ollama remains configured as the required local fallback so the system still works when OpenAI is rate-limited, temporarily unavailable, or missing during demonstrations.
 
 ## 2. AI Feature Scope
 
@@ -22,23 +22,25 @@ The PageTurner AI assistant should:
 
 ## 3. Success Criteria
 
-- The assistant works using Ollama locally.
-- Normal prompts return in under 5 seconds when Ollama is running.
-- The system shows a graceful error or fallback response if Ollama is unavailable.
-- `FakeAIProvider` works for tests, offline demo, and controlled fallback behavior.
-- No cloud API keys are required.
+- The assistant works using OpenAI as the primary provider when `OPENAI_API_KEY` is configured.
+- Normal prompts return in under 5 seconds for typical book discovery requests.
+- The system falls back from OpenAI to Ollama when OpenAI is rate-limited or unavailable.
+- `FakeAIProvider` works for tests and final controlled fallback behavior.
+- API keys are stored only in `.env` and are never printed in evidence output.
 - All AI calls are logged.
 - All AI decisions are auditable.
 - AI output is escaped in views.
-- Tests pass without Ollama running by using the fake provider.
+- Tests pass without OpenAI or Ollama running by using faked HTTP responses and the fake provider.
 
 ## 4. AI Provider Decision
 
-- Main provider: Ollama.
+- Main provider: OpenAI.
+- Default OpenAI model: `gpt-4o-mini`.
+- Required local fallback provider: Ollama.
 - Default local model: `llama3.2`.
 - Optional embedding model: `nomic-embed-text`, documented only unless later implemented.
-- Fallback provider: `fake`.
-- OpenAI, Gemini, Hugging Face, Google APIs, and paid cloud APIs are not required.
+- Final fallback provider: `fake`.
+- Gemini, Hugging Face, Google APIs, and paid cloud APIs are not required for this implementation.
 
 ## 5. Out of Scope
 

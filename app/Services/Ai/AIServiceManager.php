@@ -6,7 +6,9 @@ use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\DTOs\AIRequest;
 use App\Services\AI\DTOs\AIResponse;
 use App\Services\AI\Providers\FakeAIProvider;
+use App\Services\AI\Providers\GeminiProvider;
 use App\Services\AI\Providers\OllamaProvider;
+use App\Services\AI\Providers\OpenAIProvider;
 use Throwable;
 
 class AIServiceManager
@@ -17,6 +19,8 @@ class AIServiceManager
         protected ?AIUsageTracker $usageTracker = null,
         protected ?AIAuditLogger $auditLogger = null,
         protected ?AISafetyService $safetyService = null,
+        protected ?OpenAIProvider $openAIProvider = null,
+        protected ?GeminiProvider $geminiProvider = null,
     ) {}
 
     public function generate(AIRequest $request): AIResponse
@@ -55,55 +59,59 @@ class AIServiceManager
         }
 
         if (! (bool) config('ai.enabled', true)) {
-            $response = $this->fallback($request, 'Ollama is disabled.');
+            $response = $this->generateFromChain($request, [$this->primaryName()], $this->providerLabel($this->primaryName()).' is disabled.');
             $this->record($request, $response, $response->success ? AIAuditLogger::FALLBACK_TRIGGERED : AIAuditLogger::AI_UNAVAILABLE);
 
             return $response;
         }
 
-        try {
-            $response = $this->primaryProvider()->generate($request);
+        $response = $this->generateFromChain($request);
+        $this->record(
+            $request,
+            $response,
+            $response->success
+                ? ($response->fallbackUsed ? AIAuditLogger::FALLBACK_TRIGGERED : $this->successAction($request))
+                : AIAuditLogger::AI_UNAVAILABLE
+        );
 
-            if ($response->success) {
-                $this->record($request, $response, $this->successAction($request));
-
-                return $response;
-            }
-
-            $fallback = $this->fallback($request, $response->errorMessage ?: 'Ollama failed.');
-            $this->record($request, $fallback, $fallback->success ? AIAuditLogger::FALLBACK_TRIGGERED : AIAuditLogger::AI_UNAVAILABLE);
-
-            return $fallback;
-        } catch (Throwable) {
-            $fallback = $this->fallback($request, 'Ollama failed.');
-            $this->record($request, $fallback, $fallback->success ? AIAuditLogger::FALLBACK_TRIGGERED : AIAuditLogger::AI_UNAVAILABLE);
-
-            return $fallback;
-        }
+        return $response;
     }
 
-    protected function fallback(AIRequest $request, string $reason): AIResponse
+    protected function generateFromChain(AIRequest $request, array $skipProviders = [], ?string $initialReason = null): AIResponse
     {
-        try {
-            $response = $this->fakeProvider->generate($request);
+        $lastReason = $initialReason;
+        $attempt = 0;
+        $skipProviders = array_map('strtolower', $skipProviders);
+
+        foreach ($this->providerChain() as $providerName) {
+            if (in_array($providerName, $skipProviders, true)) {
+                continue;
+            }
+
+            $attempt++;
+            $provider = $this->provider($providerName);
+
+            if (! $provider) {
+                $lastReason = $this->providerLabel($providerName).' is not configured.';
+
+                continue;
+            }
+
+            try {
+                $response = $provider->generate($request);
+            } catch (Throwable) {
+                $lastReason = $this->providerLabel($providerName).' failed.';
+
+                continue;
+            }
 
             if ($response->success) {
-                return new AIResponse(
-                    success: true,
-                    provider: $response->provider,
-                    model: $response->model,
-                    content: $response->content,
-                    confidence: $response->confidence,
-                    tokensInput: $response->tokensInput,
-                    tokensOutput: $response->tokensOutput,
-                    latencyMs: $response->latencyMs,
-                    fallbackUsed: true,
-                    errorMessage: $reason,
-                    rawMetadata: array_merge($response->rawMetadata, ['fallback_reason' => $reason]),
-                );
+                return $attempt > 1 || $initialReason !== null
+                    ? $this->markFallback($response, $lastReason ?: $this->providerLabel($this->primaryName()).' failed.')
+                    : $response;
             }
-        } catch (Throwable) {
-            //
+
+            $lastReason = $response->errorMessage ?: $this->providerLabel($providerName).' failed.';
         }
 
         return new AIResponse(
@@ -113,16 +121,80 @@ class AIServiceManager
             content: 'AI service is temporarily unavailable. Please try again later.',
             fallbackUsed: true,
             errorMessage: 'AI service is temporarily unavailable.',
-            rawMetadata: ['fallback_reason' => $reason],
+            rawMetadata: ['fallback_reason' => $lastReason],
         );
     }
 
     protected function primaryProvider(): AIProviderInterface
     {
-        return match ((string) config('ai.provider', 'ollama')) {
+        return $this->provider($this->primaryName()) ?? $this->ollamaProvider;
+    }
+
+    protected function provider(string $name): ?AIProviderInterface
+    {
+        return match ($name) {
+            'openai' => $this->openAIProvider ??= app(OpenAIProvider::class),
+            'gemini' => $this->geminiProvider ??= app(GeminiProvider::class),
+            'ollama' => $this->ollamaProvider,
             'fake' => $this->fakeProvider,
-            default => $this->ollamaProvider,
+            default => null,
         };
+    }
+
+    protected function providerChain(): array
+    {
+        $primary = $this->primaryName();
+        $configured = config('ai.fallback_chain');
+
+        if (is_string($configured) && trim($configured) !== '') {
+            $chain = array_map('trim', explode(',', $configured));
+        } elseif (is_array($configured)) {
+            $chain = $configured;
+        } elseif (in_array($primary, ['openai', 'gemini'], true)) {
+            $chain = [$primary, 'ollama', 'fake'];
+        } else {
+            $chain = [$primary, (string) config('ai.fallback_provider', 'fake')];
+        }
+
+        return collect(array_merge([$primary], $chain))
+            ->map(fn ($provider) => strtolower(trim((string) $provider)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    protected function primaryName(): string
+    {
+        return strtolower(trim((string) config('ai.provider', 'openai'))) ?: 'openai';
+    }
+
+    protected function providerLabel(string $provider): string
+    {
+        return match ($provider) {
+            'openai' => 'OpenAI',
+            'gemini' => 'Gemini',
+            'ollama' => 'Ollama',
+            'fake' => 'Fake provider',
+            default => ucfirst($provider),
+        };
+    }
+
+    protected function markFallback(AIResponse $response, string $reason): AIResponse
+    {
+        return new AIResponse(
+            success: $response->success,
+            provider: $response->provider,
+            model: $response->model,
+            content: $response->content,
+            confidence: $response->confidence,
+            tokensInput: $response->tokensInput,
+            tokensOutput: $response->tokensOutput,
+            latencyMs: $response->latencyMs,
+            fallbackUsed: true,
+            errorMessage: $reason,
+            rawMetadata: array_merge($response->rawMetadata, ['fallback_reason' => $reason]),
+        );
     }
 
     protected function normalize(AIRequest $request): AIRequest

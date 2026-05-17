@@ -18,7 +18,7 @@ trait LogsScheduledTask
                 'status' => 'success',
                 'description' => $description,
                 'output' => is_string($message) ? $message : null,
-                'runtime_ms' => $startedAt->diffInMilliseconds(now()),
+                'runtime_ms' => $this->runtimeMilliseconds($startedAt),
                 'started_at' => $startedAt,
                 'finished_at' => now(),
             ]);
@@ -34,7 +34,7 @@ trait LogsScheduledTask
                 'status' => 'failed',
                 'description' => $description,
                 'output' => $exception->getMessage(),
-                'runtime_ms' => $startedAt->diffInMilliseconds(now()),
+                'runtime_ms' => $this->runtimeMilliseconds($startedAt),
                 'started_at' => $startedAt,
                 'finished_at' => now(),
             ]);
@@ -45,5 +45,10 @@ trait LogsScheduledTask
 
             return self::FAILURE;
         }
+    }
+
+    protected function runtimeMilliseconds($startedAt): int
+    {
+        return (int) round($startedAt->diffInMilliseconds(now()));
     }
 }

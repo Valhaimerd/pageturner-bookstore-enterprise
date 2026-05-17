@@ -4,11 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\TwoFactorChallenge;
 use App\Models\TwoFactorSecret;
+use App\Services\AuditLogger;
 use Illuminate\Http\Request;
 
 class TwoFactorController extends Controller
 {
-    public function enable(Request $request)
+    public function enable(Request $request, AuditLogger $auditLogger)
     {
         $user = $request->user();
 
@@ -28,6 +29,11 @@ class TwoFactorController extends Controller
         );
 
         $user->update(['two_factor_enabled' => true]);
+        $auditLogger->userEvent($user, 'two_factor_enabled', [
+            'two_factor_enabled' => false,
+        ], [
+            'two_factor_enabled' => true,
+        ], $request);
 
         $request->session()->put('two_factor_passed', true);
         $request->session()->forget('two_factor_challenge_id');
@@ -35,7 +41,7 @@ class TwoFactorController extends Controller
         return back()->with('success', '2FA enabled.');
     }
 
-    public function disable(Request $request)
+    public function disable(Request $request, AuditLogger $auditLogger)
     {
         $user = $request->user();
 
@@ -43,6 +49,11 @@ class TwoFactorController extends Controller
         TwoFactorSecret::where('user_id', $user->id)->delete();
 
         $user->update(['two_factor_enabled' => false]);
+        $auditLogger->userEvent($user, 'two_factor_disabled', [
+            'two_factor_enabled' => true,
+        ], [
+            'two_factor_enabled' => false,
+        ], $request);
 
         $request->session()->forget('two_factor_challenge_id');
         $request->session()->forget('two_factor_passed');

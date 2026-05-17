@@ -15,6 +15,10 @@
             <div class="soft-alert-success">{{ session('success') }}</div>
         @endif
 
+        @if(session('error'))
+            <div class="soft-alert-danger">{{ session('error') }}</div>
+        @endif
+
         @if($errors->any())
             <div class="soft-alert-danger">
                 <ul class="space-y-1">
@@ -187,6 +191,24 @@
                             <option value="completed">Completed</option>
                             <option value="cancelled">Cancelled</option>
                         </select>
+                    </div>
+                    <div>
+                        <label class="form-label">Financial Report</label>
+                        <select name="financial_report_type" class="form-input">
+                            <option value="">Standard order export</option>
+                            <option value="revenue_summary">Revenue summary</option>
+                            <option value="tax_report">Tax report</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="form-label">From</label>
+                            <input type="date" name="date_from" class="form-input">
+                        </div>
+                        <div>
+                            <label class="form-label">To</label>
+                            <input type="date" name="date_to" class="form-input">
+                        </div>
                     </div>
                     <div>
                         <label class="form-label">Customer</label>

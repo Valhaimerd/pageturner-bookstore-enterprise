@@ -1,6 +1,6 @@
 # Laboratory Activity 8 Technical Documentation
 
-## PageTurner AI Book Discovery and Customer Support Assistant Using Ollama
+## PageTurner AI Book Discovery and Customer Support Assistant Using OpenAI With Ollama Fallback
 
 ## Problem Identification
 
@@ -10,7 +10,7 @@ The problem becomes more visible as the catalog grows. Keyword search depends on
 
 This affects several user groups. Visitors who are not yet logged in need quick guidance before they decide to buy. Customers with accounts may want recommendations based on their current learning goal or mood. Students and beginner developers may need a sequence of books rather than one exact title. Administrators also need evidence of how the AI system is used, whether it falls back correctly, and whether it stays within bookstore scope.
 
-Laboratory Activity 8 addresses this by adding an AI assistant that acts like a local book discovery helper. The assistant accepts natural-language questions, retrieves relevant active books from the PageTurner database, sends only those candidate books to Ollama, validates the AI response, and displays grounded recommendations. The system is intentionally local-first. It does not require OpenAI, Gemini, Hugging Face, Google APIs, or any paid cloud AI service. Ollama is selected because it runs on the developer machine or local server, supports real language-model behavior, avoids cloud API keys, and matches the requirement for AI integration without ongoing external cost.
+Laboratory Activity 8 addresses this by adding an AI assistant that acts like a book discovery helper. The assistant accepts natural-language questions, retrieves relevant active books from the PageTurner database, sends only those candidate books to OpenAI, validates the AI response, and displays grounded recommendations. OpenAI is the primary provider because it gives strong conversational reasoning and structured JSON output for the customer-facing assistant. Ollama is still required and configured as the local fallback so the system continues to work when OpenAI is rate-limited, unavailable, or not configured during local demonstrations.
 
 ## Solution Design
 
@@ -22,8 +22,9 @@ user question
 -> retrieve relevant books from the PageTurner database
 -> build a grounded prompt with only those candidate books
 -> call AIServiceManager
--> use Ollama as the main provider
--> fall back to FakeAIProvider when needed
+-> use OpenAI as the main provider
+-> fall back to Ollama when OpenAI fails or is rate-limited
+-> fall back to FakeAIProvider only when cloud and local providers are unavailable
 -> validate JSON output
 -> remove invented book IDs
 -> show recommendations
@@ -37,35 +38,37 @@ The API backend exposes assistant functionality for programmatic use. The messag
 
 The recommendation service does not send the full books table to the model. `BookDiscoveryAIService` uses the existing repository behavior to retrieve a small set of candidate books, normally five to ten records. It includes only needed fields such as ID, slug, title, author, price, stock, category, description, status, publisher, and format. This keeps prompts small, reduces privacy risk, improves response time, and makes output validation possible.
 
-The assistant expects JSON with an answer, recommendations, confidence, optional follow-up question, and a `needs_human_help` flag. If Ollama returns invalid JSON, the service attempts a simple repair by extracting a JSON object. If that still fails, the service uses deterministic local recommendations from the retrieved candidate books. Any recommendation that references a book ID outside the candidate set is removed. Low confidence sets `needs_human_help=true`.
+The assistant expects JSON with an answer, recommendations, confidence, optional follow-up question, and a `needs_human_help` flag. OpenAI is asked for JSON output through the Responses API text format settings, and the same server-side validation still runs afterward. If OpenAI returns invalid JSON, the manager falls back to Ollama. If all model output is still invalid or unavailable, the service uses deterministic local recommendations from the retrieved candidate books. Any recommendation that references a book ID outside the candidate set is removed. Low confidence sets `needs_human_help=true`.
 
 ## Architecture Decisions
 
-The AI architecture is separated into clear responsibilities so controllers do not call Ollama directly. This makes the implementation testable and keeps AI behavior centralized.
+The AI architecture is separated into clear responsibilities so controllers do not call OpenAI or Ollama directly. This makes the implementation testable and keeps AI behavior centralized.
 
-`OllamaProvider` is the real provider. It calls the local Ollama HTTP API, using the configured base URL and model. The default model is `llama3.2`. The provider uses the chat endpoint because the assistant needs a system prompt, user prompt, and structured context. It sends `stream=false` so the application receives one complete response. If Ollama is unavailable, returns an HTTP error, returns empty content, or returns invalid JSON when JSON is expected, the provider returns a failed `AIResponse` instead of throwing raw errors to the user.
+`OpenAIProvider` is the primary provider. It calls the OpenAI Responses API at `/v1/responses` using Laravel's HTTP client, the configured `OPENAI_API_KEY`, and the default `gpt-4o-mini` model. It sends the system prompt, user prompt, and sanitized context as response input. When JSON is expected, it requests JSON output and still validates the response before returning success. Rate limits, server errors, empty responses, invalid JSON, missing API keys, and network failures return failed `AIResponse` objects so the manager can continue through the fallback chain.
 
-`FakeAIProvider` is the deterministic fallback provider. It is used for automated tests, offline demonstrations, and graceful fallback. It never calls external services. For book discovery, it ranks supplied candidate books and returns predictable JSON. This makes PHPUnit reliable because the tests do not require a running Ollama server.
+`OllamaProvider` is the local fallback provider. It calls the local Ollama HTTP API, using the configured base URL and model. The default model is `llama3.2`. The provider uses the chat endpoint because the assistant needs a system prompt, user prompt, and structured context. It sends `stream=false` so the application receives one complete response. If Ollama is unavailable, returns an HTTP error, returns empty content, or returns invalid JSON when JSON is expected, the provider returns a failed `AIResponse` instead of throwing raw errors to the user.
 
-`AIServiceManager` is the only entry point for AI generation. It exposes direct and fallback generation methods. It applies input safety checks, selects the configured provider, handles fallback to fake, returns safe failure messages when both providers fail, records usage logs, and writes audit events. Controllers and services use the manager instead of creating provider instances directly.
+`FakeAIProvider` is the deterministic final fallback provider. It is used for automated tests, offline demonstrations, and graceful failure recovery when OpenAI and Ollama are unavailable. It never calls external services. For book discovery, it ranks supplied candidate books and returns predictable JSON. This makes PHPUnit reliable because the tests do not require real OpenAI credentials or a running Ollama server.
+
+`AIServiceManager` is the only entry point for AI generation. It exposes direct and fallback generation methods. It applies input safety checks, builds the configured fallback chain, tries OpenAI first, falls back to Ollama, then falls back to fake, returns safe failure messages when all providers fail, records usage logs, and writes audit events. Controllers and services use the manager instead of creating provider instances directly.
 
 `BookDiscoveryAIService` is the core domain service for recommendations. It receives the user question, optional user ID, optional conversation ID, and optional filters. It retrieves active in-stock candidates, builds the grounded prompt, calls the manager with feature `book_discovery_recommendations`, parses and validates the result, removes invented IDs, sanitizes output text, and returns structured recommendation data with actual `Book` models.
 
 `AISafetyService` provides deterministic responsible AI safeguards. It blocks empty or over-length input, attempts to reveal secrets, `.env` values, API keys, hidden instructions, prompt override attempts, private user/order data requests, SQL injection-like input, and spammy or abusive content. It also sanitizes AI output by stripping raw HTML and replacing unsafe text patterns with a safe refusal. These checks are not model-based, so they run quickly and consistently.
 
-`AIUsageTracker` writes operational records to `ai_usage_logs`. It stores provider, model, feature, token counts where available, latency, fallback flag, success flag, error code, cost estimate, user ID, conversation ID, and sanitized metadata. Cost is recorded as zero because Ollama and fake are local/free.
+`AIUsageTracker` writes operational records to `ai_usage_logs`. It stores provider, model, feature, token counts where available, latency, fallback flag, success flag, error code, cost estimate, user ID, conversation ID, and sanitized metadata. OpenAI token usage is captured from the Responses API usage object. Secrets, prompts, authorization headers, stack traces, and raw content are excluded from metadata.
 
 `AIAuditLogger` writes AI decision events to `ai_audit_events`. It records events such as `chat_response_generated`, `recommendation_generated`, `fallback_triggered`, `unsafe_input_blocked`, and `ai_unavailable`. It stores input and output hashes instead of raw sensitive content. It also writes a sanitized line to `storage/logs/ai-audit.log`.
 
 `ProcessAIConversationSummary` is the queued summary job. It runs on the `ai-tasks` queue, accepts a conversation ID, loads recent messages safely, calls `AIServiceManager` with feature `summarization`, and stores a short summary in `ai_conversations.metadata.summary`. The job has three tries and a 60-second timeout. It preserves existing metadata and leaves the conversation unchanged if the provider fails.
 
-The admin monitoring dashboard is available at `/admin/ai-monitoring`. It uses `ai_usage_logs` and `ai_audit_events` to show Lab 8 evidence: total calls, calls today, success and failure counts, fallback count, provider usage, Ollama calls, fake fallback calls, average latency, recent usage logs, recent audit events, top features, and total estimated cost.
+The admin monitoring dashboard is available at `/admin/ai-monitoring`. It uses `ai_usage_logs` and `ai_audit_events` to show Lab 8 evidence: total calls, calls today, success and failure counts, fallback count, provider usage, OpenAI calls, Ollama calls, fake fallback calls, average latency, recent usage logs, recent audit events, top features, and total estimated cost.
 
 ## Implementation Details
 
 The customer assistant route is `GET /ai-assistant`, and messages are posted to `POST /ai-assistant/messages`. The page is implemented in Blade and uses the existing app layout. It does not add Vue, React, or another heavy frontend framework. Alpine is already present in the project and is used only for small UI behavior such as loading state and demo prompt buttons.
 
-When a message is submitted, `BookAssistantController` resolves or creates an `AIConversation`. Authenticated customers get a conversation with `user_id`. Guests get a conversation with `session_id`. The controller stores the user message in `ai_messages`, calls `BookDiscoveryAIService`, then stores the assistant message. The assistant message metadata includes recommended book IDs, fallback status, latency, human-help flag, and a safe error code. It does not store raw Ollama stack traces.
+When a message is submitted, `BookAssistantController` resolves or creates an `AIConversation`. Authenticated customers get a conversation with `user_id`. Guests get a conversation with `session_id`. The controller stores the user message in `ai_messages`, calls `BookDiscoveryAIService`, then stores the assistant message. The assistant message metadata includes recommended book IDs, fallback status, latency, human-help flag, and a safe error code. It does not store raw OpenAI or Ollama stack traces.
 
 The API assistant uses the same controller logic but returns JSON. Because API requests are stateless, guest API clients use `X-AI-Session-ID`. If the header is missing, the server creates one and returns it in the response. The API conversation endpoints enforce ownership. Authenticated users can only read their own conversations. Guests can only read conversations matching their session header.
 
@@ -83,7 +86,7 @@ The admin monitoring dashboard is admin-only through the existing `auth`, `twofa
 
 ## Testing Results
 
-Lab 8 tests are designed to run without Ollama. The test environment uses `FakeAIProvider`, SQLite-compatible schema, no Redis requirement, no Scout engine requirement, no API keys, and no real external AI server. This ensures that the laboratory evidence can be generated quickly and consistently.
+Lab 8 tests are designed to run without real OpenAI or Ollama services. The test environment uses faked HTTP responses, `FakeAIProvider`, SQLite-compatible schema, no Redis requirement, no Scout engine requirement, no real API keys, and no real external AI server. This ensures that the laboratory evidence can be generated quickly and consistently.
 
 Recommended commands:
 
@@ -96,7 +99,8 @@ php artisan test
 
 Testing result placeholders:
 
-- Ollama response time:
+- OpenAI response time:
+- Ollama fallback response time:
 - Fake fallback result:
 - Queue result:
 - Usage tracking result:
@@ -105,7 +109,7 @@ Testing result placeholders:
 
 The tests cover the customer page loading, guest recommendations, authenticated customer recommendations, message persistence, grounded active-book recommendations, inactive book exclusion, usage log creation, audit event creation, fallback behavior, graceful all-provider failure, prompt injection blocking, invalid input validation, conversation authorization, admin monitoring access, queued summary execution, and HTML-output sanitization.
 
-`AIServiceManagerTest` verifies fallback and logging behavior. It confirms that Ollama disabled or unavailable cases use the fake provider, that both-provider failure returns a safe response, that prompt injection is blocked before provider calls, and that successful generation writes usage and audit records.
+`AIServiceManagerTest` verifies fallback and logging behavior. It confirms that OpenAI success writes usage and audit records, OpenAI rate limits and connection failures fall back to Ollama, invalid OpenAI JSON falls back to Ollama, OpenAI plus Ollama failure falls back to fake, Ollama disabled or unavailable cases use fake, both-provider failure returns a safe response, and prompt injection is blocked before provider calls.
 
 `BookDiscoveryAIServiceTest` verifies grounded recommendations. It confirms active books can be recommended, inactive books are not recommended, invented IDs are removed, invalid JSON falls back locally, low confidence escalates to human help, and raw HTML is stripped from AI output.
 
@@ -115,11 +119,11 @@ The tests cover the customer page loading, guest recommendations, authenticated 
 
 ## Cost Analysis
 
-The Lab 8 implementation is local-first. Ollama runs on the local machine or local server. It does not charge per token and does not require a cloud account. The fake provider is deterministic local PHP code and is also free. Because of this, PageTurner stores `cost_estimate` as zero for the implemented providers.
+The Lab 8 implementation is free-tier aware. OpenAI is the primary cloud provider and its API key is stored only in `.env`. Ollama runs on the local machine or local server as the required no-cost fallback. The fake provider is deterministic local PHP code and is also free. PageTurner stores provider usage and estimated cost in `ai_usage_logs` so the admin dashboard can show the operational impact of AI calls.
 
-This is important for a laboratory environment. Students and evaluators can run the feature without registering for paid APIs, creating billing accounts, or storing real API keys. The `.env.example` file contains safe local settings only. No OpenAI, Gemini, Hugging Face, Google, or paid cloud provider key is required.
+This is important for a laboratory environment. Students and evaluators can demonstrate the real cloud provider when a valid OpenAI key is configured, then demonstrate reliability by forcing OpenAI failure and showing Ollama fallback. The `.env.example` file contains empty placeholders only and never includes real keys. Gemini, Hugging Face, Google, and paid cloud provider keys are not required.
 
-The admin dashboard includes estimated cost total as evidence. It is expected to show zero for local Ollama and fake fallback calls. If a future version adds a paid provider, the provider abstraction and usage tracker could be extended to calculate and record actual cost per call. For this Lab 8 version, the cost analysis is simple: Ollama is free to run locally, FakeAIProvider is free, and estimated AI cost is zero.
+The admin dashboard includes estimated cost total as evidence. It is expected to show provider usage for OpenAI, Ollama, and fake fallback calls. The current cost estimator remains conservative, but token counts are captured for OpenAI so cost calculations can be refined later without changing the provider interface.
 
 ## Responsible AI
 
@@ -145,4 +149,4 @@ The fourth improvement is review summarization. PageTurner already has reviews, 
 
 The fifth improvement is richer admin analytics. The current dashboard shows operational evidence. Future analytics could show common topics, common failed requests, fallback trends, low-confidence trends, conversion after recommendation, and category demand signals. These insights would help administrators improve catalog metadata, inventory planning, and customer support.
 
-Overall, Laboratory Activity 8 adds an AI assistant that is practical, local-first, auditable, and safe by design. It improves book discovery without replacing the existing catalog, cart, checkout, admin, Lab 6, or Lab 7 features. The implementation keeps recommendations grounded in PageTurner data, uses Ollama as the main real AI provider, supports fake fallback for testing and offline use, and records evidence for monitoring and evaluation.
+Overall, Laboratory Activity 8 adds an AI assistant that is practical, auditable, and safe by design. It improves book discovery without replacing the existing catalog, cart, checkout, admin, Lab 6, or Lab 7 features. The implementation keeps recommendations grounded in PageTurner data, uses OpenAI as the main provider, uses Ollama as the required local fallback, supports fake fallback for testing and final offline recovery, and records evidence for monitoring and evaluation.

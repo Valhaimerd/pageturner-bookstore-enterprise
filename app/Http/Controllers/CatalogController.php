@@ -14,14 +14,18 @@ class CatalogController extends Controller
     public function index(Request $request, BookRepository $bookRepository)
     {
         $selectedCategory = $request->query('category');
+        $search = trim((string) $request->query('search', ''));
 
         $categories = Category::where('is_active', true)
             ->orderBy('name')
             ->get();
 
-        $books = $bookRepository->catalogCursor(['category' => $selectedCategory], 12);
+        $books = $bookRepository->catalogCursor([
+            'category' => $selectedCategory,
+            'search' => $search,
+        ], 12);
 
-        return view('catalog.index', compact('books', 'categories', 'selectedCategory'));
+        return view('catalog.index', compact('books', 'categories', 'selectedCategory', 'search'));
     }
 
     public function show(Book $book, Request $request, BookRepository $bookRepository)
@@ -43,7 +47,7 @@ class CatalogController extends Controller
             $purchased = OrderItem::where('book_id', $book->id)
                 ->whereHas('order', function ($q) use ($userId) {
                     $q->where('user_id', $userId)
-                      ->where('status', '!=', 'cancelled');
+                        ->where('status', '!=', 'cancelled');
                 })
                 ->exists();
 

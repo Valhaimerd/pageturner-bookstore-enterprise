@@ -39,6 +39,17 @@ class LabEightAIAdminMonitoringTest extends TestCase
 
         AIUsageLog::factory()->create([
             'user_id' => $admin->id,
+            'provider' => 'openai',
+            'model' => 'gpt-4o-mini',
+            'feature' => 'book_discovery_recommendations',
+            'success' => true,
+            'fallback_used' => false,
+            'latency_ms' => 90,
+            'cost_estimate' => 0,
+        ]);
+
+        AIUsageLog::factory()->create([
+            'user_id' => $admin->id,
             'provider' => 'ollama',
             'model' => 'llama3.2:latest',
             'feature' => 'book_discovery_recommendations',
@@ -73,7 +84,8 @@ class LabEightAIAdminMonitoringTest extends TestCase
         $this->actingAs($admin)
             ->get(route('admin.ai-monitoring.index'))
             ->assertOk()
-            ->assertSee('2')
+            ->assertSee('3')
+            ->assertSee('OpenAI')
             ->assertSee('Ollama')
             ->assertSee('Fake')
             ->assertSee('summarization')

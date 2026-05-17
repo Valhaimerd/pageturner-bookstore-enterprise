@@ -4,11 +4,14 @@ namespace App\Providers;
 
 use App\Models\BackupMonitoring;
 use App\Models\Book;
+use App\Models\User;
 use App\Observers\BookObserver;
-use App\Services\AuditLogger;
 use App\Services\AI\Contracts\AIProviderInterface;
 use App\Services\AI\Providers\FakeAIProvider;
+use App\Services\AI\Providers\GeminiProvider;
 use App\Services\AI\Providers\OllamaProvider;
+use App\Services\AI\Providers\OpenAIProvider;
+use App\Services\AuditLogger;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Auth\Events\Login;
@@ -18,6 +21,7 @@ use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Backup\Events\BackupHasFailed;
@@ -33,6 +37,8 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->bind(AIProviderInterface::class, function ($app) {
             return match ((string) config('ai.provider', 'ollama')) {
+                'openai' => $app->make(OpenAIProvider::class),
+                'gemini' => $app->make(GeminiProvider::class),
                 'fake' => $app->make(FakeAIProvider::class),
                 default => $app->make(OllamaProvider::class),
             };
@@ -45,6 +51,7 @@ class AppServiceProvider extends ServiceProvider
         Book::observe(BookObserver::class);
         $this->registerAuthAuditListeners();
         $this->registerBackupListeners();
+        $this->registerSecurityChangeNotifications();
     }
 
     protected function configureRateLimiters(): void
@@ -91,7 +98,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app['events']->listen(PasswordReset::class, fn (PasswordReset $event) => $logger->userEvent($event->user, 'password_reset', request: request()));
         $this->app['events']->listen(Failed::class, fn (Failed $event) => $logger->userEvent($event->user, 'login_failed', request: request()));
         $this->app['events']->listen(Lockout::class, function (Lockout $event) use ($logger): void {
-            $user = \App\Models\User::where('email', request('email'))->first();
+            $user = User::where('email', request('email'))->first();
             $logger->userEvent($user, 'login_locked', request: request());
         });
     }
@@ -143,5 +150,30 @@ class AppServiceProvider extends ServiceProvider
             'message' => $event->backupDestinationStatus->backupDestination()->backupName(),
             'happened_at' => now(),
         ]));
+    }
+
+    protected function registerSecurityChangeNotifications(): void
+    {
+        User::updated(function (User $user): void {
+            $watched = ['role', 'subscription_tier', 'is_active'];
+
+            if (! collect($watched)->contains(fn (string $attribute) => $user->wasChanged($attribute))) {
+                return;
+            }
+
+            $changes = collect($watched)
+                ->filter(fn (string $attribute) => $user->wasChanged($attribute))
+                ->map(fn (string $attribute) => "{$attribute}: {$user->getOriginal($attribute)} -> {$user->{$attribute}}")
+                ->implode(', ');
+
+            User::where('role', 'admin')
+                ->whereKeyNot($user->id)
+                ->pluck('email')
+                ->filter()
+                ->each(fn (string $email) => Mail::raw(
+                    "Security-sensitive account change detected for {$user->email}: {$changes}",
+                    fn ($message) => $message->to($email)->subject('PageTurner Security Account Change')
+                ));
+        });
     }
 }

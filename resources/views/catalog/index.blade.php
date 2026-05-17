@@ -15,7 +15,7 @@
             <div>
                 <h3 class="store-toolbar-title">Find your next read</h3>
                 <p class="store-toolbar-text">
-                    Explore the collection and filter by category.
+                    Search by keyword, author, ISBN, or category.
                 </p>
                 <div class="mt-4 rounded-2xl border border-brand-100 bg-brand-50 p-4">
                     <p class="text-sm font-semibold text-ink-900">Need help choosing?</p>
@@ -29,6 +29,15 @@
             </div>
 
             <form method="GET" action="{{ route('books.index') }}" class="filter-form">
+                <input
+                    type="search"
+                    name="search"
+                    value="{{ $search }}"
+                    class="filter-select"
+                    placeholder="Search title, author, ISBN, or description"
+                    aria-label="Search books"
+                >
+
                 <select name="category" class="filter-select">
                     <option value="">All Categories</option>
                     @foreach($categories as $category)
@@ -99,7 +108,7 @@
             <div class="empty-state-card">
                 <h3 class="empty-state-title">No books found</h3>
                 <p class="empty-state-text">
-                    Try changing the selected category or reset the filter.
+                    Try another search term, change the selected category, or reset the filters.
                 </p>
             </div>
         @endif

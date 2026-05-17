@@ -141,6 +141,10 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'dump' => array_filter([
+                'dump_binary_path' => env('PG_DUMP_BINARY_PATH') ?: env('PGSQL_DUMP_PATH'),
+                'add_extra_option' => '--restrict-key='.env('PG_DUMP_RESTRICT_KEY', 'PageTurnerBackup'),
+            ]),
         ],
 
         'sqlsrv' => [

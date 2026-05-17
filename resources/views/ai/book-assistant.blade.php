@@ -11,8 +11,16 @@
     </x-slot>
 
     @php
-        $provider = ucfirst((string) ($result['provider_used'] ?? 'ollama'));
-        $providerLabel = $provider === 'Fake' ? 'Fake' : ($provider === 'Local' ? 'Local' : ($provider === 'None' ? 'Unavailable' : 'Ollama'));
+        $providerName = strtolower((string) ($result['provider_used'] ?? 'openai'));
+        $providerLabel = match ($providerName) {
+            'openai' => 'OpenAI',
+            'gemini' => 'Gemini',
+            'ollama' => 'Ollama',
+            'fake' => 'Fake',
+            'local' => 'Local',
+            'none' => 'Unavailable',
+            default => ucfirst($providerName),
+        };
         $demoPrompts = [
             'I want something inspiring about friendship',
             'Recommend beginner Laravel books',
@@ -52,7 +60,11 @@
 
                             @if($message->role === 'assistant' && $message->provider)
                                 <span class="status-pill status-pill-default">
-                                    {{ ucfirst($message->provider) }}
+                                    {{ match ($message->provider) {
+                                        'openai' => 'OpenAI',
+                                        'gemini' => 'Gemini',
+                                        default => ucfirst($message->provider),
+                                    } }}
                                 </span>
                             @endif
                         </div>
@@ -192,7 +204,7 @@
                     <span class="dashboard-chip">How it works</span>
                     <h3 class="mt-4 content-card-title">Grounded catalog recommendations</h3>
                     <p class="mt-2 text-sm leading-6 text-ink-500">
-                        The assistant retrieves real active books first, then uses Ollama or the local fake provider to explain which books match your request.
+                        The assistant retrieves real active books first, then uses Gemini or OpenAI with Ollama and fake fallback providers to explain which books match your request.
                     </p>
                 </section>
             @endif

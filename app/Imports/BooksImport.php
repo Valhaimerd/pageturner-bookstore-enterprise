@@ -89,7 +89,7 @@ class BooksImport implements ShouldQueue, SkipsEmptyRows, SkipsOnFailure, ToMode
     {
         return [
             '*.isbn' => [
-                'nullable',
+                'required',
                 'regex:/^(97(8|9))?\d{9}(\d|X)$/i',
             ],
             '*.title' => ['required', 'string', 'max:255'],

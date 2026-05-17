@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
             DemoOrderSeeder::class,
             DemoReviewSeeder::class,
             DemoCartSeeder::class,
+            DemoActivitySeeder::class,
         ]);
 
         if (filter_var(env('MASS_BOOK_SEED_ENABLED', false), FILTER_VALIDATE_BOOL)) {

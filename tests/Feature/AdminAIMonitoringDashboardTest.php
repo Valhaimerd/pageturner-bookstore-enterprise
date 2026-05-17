@@ -59,6 +59,18 @@ class AdminAIMonitoringDashboardTest extends TestCase
 
         AIUsageLog::factory()->create([
             'user_id' => $admin->id,
+            'provider' => 'openai',
+            'model' => 'gpt-4o-mini',
+            'feature' => 'book_discovery_recommendations',
+            'latency_ms' => 120,
+            'fallback_used' => false,
+            'success' => true,
+            'cost_estimate' => 0,
+            'metadata' => ['response_id' => 'resp_test'],
+        ]);
+
+        AIUsageLog::factory()->create([
+            'user_id' => $admin->id,
             'provider' => 'ollama',
             'model' => 'llama3.2:latest',
             'feature' => 'book_discovery_recommendations',
@@ -122,13 +134,15 @@ class AdminAIMonitoringDashboardTest extends TestCase
             ->get(route('admin.ai-monitoring.index'))
             ->assertOk()
             ->assertSee('AI Calls All Time')
-            ->assertSee('3')
-            ->assertSee('2 / 1')
+            ->assertSee('4')
+            ->assertSee('3 / 1')
             ->assertSee('Fallback Used')
             ->assertSee('1')
+            ->assertSee('OpenAI Calls')
             ->assertSee('Ollama Calls')
             ->assertSee('Fake Fallback Calls')
-            ->assertSee('75ms')
+            ->assertSee('90ms')
+            ->assertSee('OpenAI')
             ->assertSee('Ollama')
             ->assertSee('Fake')
             ->assertSee('book discovery recommendations')

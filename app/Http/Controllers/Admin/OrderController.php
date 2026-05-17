@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Notifications\OrderStatusUpdatedNotification;
+use App\Services\AuditLogger;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -30,7 +31,7 @@ class OrderController extends Controller
         return view('admin.orders.show', compact('order'));
     }
 
-    public function update(Request $request, Order $order)
+    public function update(Request $request, Order $order, AuditLogger $auditLogger)
     {
         $this->authorize('update', $order);
 
@@ -41,11 +42,16 @@ class OrderController extends Controller
 
         $changed = $order->status !== $validated['status']
             || $order->payment_status !== $validated['payment_status'];
+        $oldValues = $order->only(['status', 'payment_status']);
 
         $order->update([
             'status' => $validated['status'],
             'payment_status' => $validated['payment_status'],
         ]);
+
+        if ($changed) {
+            $auditLogger->log($order, 'order_status_transition', $oldValues, $order->only(['status', 'payment_status']), $request);
+        }
 
         if ($changed && $order->user) {
             $order->user->notify(new OrderStatusUpdatedNotification($order));
